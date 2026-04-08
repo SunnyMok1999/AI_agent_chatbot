@@ -68,7 +68,7 @@ body {
 }
 
 .subtitle {
-  font-size: 0.78rem;
+  font-size: 0.8rem;
   opacity: 0.8;
   margin-top: 2px;
 }
@@ -84,7 +84,7 @@ body {
 }
 
 .badge {
-  font-size: 0.72rem;
+  font-size: 0.75rem;
   padding: 0.2rem 0.55rem;
   background: var(--primary);
   color: #fff;

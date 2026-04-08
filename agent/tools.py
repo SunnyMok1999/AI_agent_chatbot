@@ -1,37 +1,105 @@
 """AI agent tools: calculator, datetime, web search, and unit conversion."""
 
+import ast
 import math
-import json
+import operator
 from datetime import datetime, timezone
-import re
+
+
+# Allowed AST node types for safe expression evaluation
+_SAFE_NODES = (
+    ast.Expression,
+    ast.BinOp,
+    ast.UnaryOp,
+    ast.Call,
+    ast.Constant,
+    ast.Name,
+    ast.Add, ast.Sub, ast.Mult, ast.Div, ast.FloorDiv,
+    ast.Mod, ast.Pow, ast.USub, ast.UAdd,
+)
+
+# Named constants accessible in expressions (e.g. "pi", "e")
+_SAFE_CONSTANTS: dict[str, float] = {
+    "pi": math.pi,
+    "e": math.e,
+}
+
+_SAFE_FUNCTIONS: dict[str, object] = {
+    "abs": abs,
+    "round": round,
+    "pow": pow,
+    "sqrt": math.sqrt,
+    "sin": math.sin,
+    "cos": math.cos,
+    "tan": math.tan,
+    "log": math.log,
+    "log10": math.log10,
+    "floor": math.floor,
+    "ceil": math.ceil,
+}
+
+
+def _safe_eval(node: ast.AST) -> float:
+    """Recursively evaluate a parsed AST node using only allowed operations."""
+    if not isinstance(node, _SAFE_NODES):
+        raise ValueError(f"Unsupported expression node: {type(node).__name__}")
+
+    if isinstance(node, ast.Expression):
+        return _safe_eval(node.body)
+
+    if isinstance(node, ast.Constant):
+        if not isinstance(node.value, (int, float)):
+            raise ValueError("Only numeric constants are allowed.")
+        return node.value
+
+    if isinstance(node, ast.Name):
+        if node.id not in _SAFE_CONSTANTS:
+            raise ValueError(f"Unknown name: {node.id}")
+        return _SAFE_CONSTANTS[node.id]
+
+    if isinstance(node, ast.BinOp):
+        ops = {
+            ast.Add: operator.add,
+            ast.Sub: operator.sub,
+            ast.Mult: operator.mul,
+            ast.Div: operator.truediv,
+            ast.FloorDiv: operator.floordiv,
+            ast.Mod: operator.mod,
+            ast.Pow: operator.pow,
+        }
+        op_fn = ops.get(type(node.op))
+        if op_fn is None:
+            raise ValueError(f"Unsupported binary operator: {type(node.op).__name__}")
+        return op_fn(_safe_eval(node.left), _safe_eval(node.right))
+
+    if isinstance(node, ast.UnaryOp):
+        if isinstance(node.op, ast.USub):
+            return -_safe_eval(node.operand)
+        if isinstance(node.op, ast.UAdd):
+            return +_safe_eval(node.operand)
+        raise ValueError(f"Unsupported unary operator: {type(node.op).__name__}")
+
+    if isinstance(node, ast.Call):
+        if not isinstance(node.func, ast.Name):
+            raise ValueError("Only named functions are allowed.")
+        fn = _SAFE_FUNCTIONS.get(node.func.id)
+        if fn is None:
+            raise ValueError(f"Unknown function: {node.func.id}")
+        if node.keywords:
+            raise ValueError("Keyword arguments are not supported.")
+        args = [_safe_eval(a) for a in node.args]
+        return fn(*args)  # type: ignore[operator]
+
+    raise ValueError(f"Unsupported node: {type(node).__name__}")
 
 
 def calculate(expression: str) -> str:
     """Safely evaluate a mathematical expression and return the result."""
-    allowed = re.compile(r"^[\d\s\+\-\*\/\(\)\.\^%,a-z_A-Z]+$")
-    if not allowed.match(expression.strip()):
-        return "Error: expression contains invalid characters."
     try:
-        # Replace ^ with ** for exponentiation
+        # Replace ^ with ** for exponentiation before parsing
         expr = expression.replace("^", "**")
-        # Expose safe math builtins
-        safe_env = {
-            "__builtins__": {},
-            "abs": abs,
-            "round": round,
-            "pow": pow,
-            "sqrt": math.sqrt,
-            "pi": math.pi,
-            "e": math.e,
-            "sin": math.sin,
-            "cos": math.cos,
-            "tan": math.tan,
-            "log": math.log,
-            "log10": math.log10,
-            "floor": math.floor,
-            "ceil": math.ceil,
-        }
-        result = eval(expr, safe_env)  # noqa: S307
+        tree = ast.parse(expr, mode="eval")
+        result = _safe_eval(tree)
         return str(result)
     except Exception as exc:
         return f"Error: {exc}"
